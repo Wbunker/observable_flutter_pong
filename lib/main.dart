@@ -1,10 +1,11 @@
 import 'dart:math';
 
-import 'package:flame/components.dart';
 import 'package:flame/game.dart';
 import 'package:flame/input.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:observable_flame_pong/ball.dart';
+import 'package:observable_flame_pong/paddle.dart';
 
 void main() {
   runApp(const MainApp());
@@ -16,30 +17,34 @@ class MainApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      home: GameWidget(game: MyGame()),
+      home: GameWidget(game: MyGame(randomVec2(Random()))),
     );
   }
 }
 
-class MyGame extends FlameGame with KeyboardEvents {
+class MyGame extends FlameGame with KeyboardEvents, HasCollisionDetection {
   late final Paddle leftPaddle;
   late final Paddle rightPaddle;
   late final Ball ball;
-  final Random rnd = Random();
   late final double ballMinX;
   late final double ballMaxX;
   late final double ballMinY;
   late final double ballMaxY;
+  Vector2 startingBallDirection;
+
+  MyGame(this.startingBallDirection);
 
   @override
   Future<void> onLoad() async {
     leftPaddle = Paddle(
       size: Vector2(size.x * .005, size.y * 0.1),
+      maxY: size.y,
       position: Vector2(size.x * .025, size.y / 2),
     );
     add(leftPaddle);
     rightPaddle = Paddle(
       size: Vector2(size.x * .005, size.y * 0.1),
+      maxY: size.y,
       position: Vector2(size.x * .975, size.y / 2),
     );
     add(rightPaddle);
@@ -48,38 +53,47 @@ class MyGame extends FlameGame with KeyboardEvents {
       radius: size.x * .005,
       position: size / 2,
     );
-    ball.movement = randomVec2();
+    ball.direction = startingBallDirection;
     add(ball);
   }
-
-  Vector2 randomVec2() => Vector2(
-        rnd.nextDouble(),
-        rnd.nextDouble(),
-      );
 
   @override
   void update(double dt) {
     super.update(dt);
-    if (leftPaddle.movement != PaddleMovement.idle) {
+    if (leftPaddle.direction != PaddleDirection.idle) {
       final dy = dt *
           leftPaddle.speed *
-          (leftPaddle.movement == PaddleMovement.up ? -1 : 1);
+          (leftPaddle.direction == PaddleDirection.up ? -1 : 1);
       // debugPrint('dy: $dy');
       leftPaddle.move(dy);
     }
-    if (rightPaddle.movement != PaddleMovement.idle) {
+    if (rightPaddle.direction != PaddleDirection.idle) {
       final dy = dt *
           rightPaddle.speed *
-          (rightPaddle.movement == PaddleMovement.up ? -1 : 1);
+          (rightPaddle.direction == PaddleDirection.up ? -1 : 1);
       rightPaddle.move(dy);
     }
+
     ball.position += Vector2(
-      ball.movement.x * dt * ball.speed,
-      ball.movement.y * dt * ball.speed,
+      ball.direction.x * dt * ball.speed,
+      ball.direction.y * dt * ball.speed,
     );
+
+    final minX = 0 + ball.radius;
+    final maxX = size.x - ball.radius;
+    final minY = 0 + ball.radius;
+    final maxY = size.y - ball.radius;
+
     ball.position = Vector2(
-        ball.position.x.clamp(0 + ball.radius, size.x - ball.radius),
-        ball.position.y.clamp(0 + ball.radius, size.y - ball.radius));
+        ball.position.x.clamp(minX, maxX), ball.position.y.clamp(minY, maxY));
+
+    if (ball.position.x == minX || ball.position.x == maxX) {
+      ball.direction = Vector2(-ball.direction.x, ball.direction.y);
+    }
+
+    if (ball.position.y == minY || ball.position.y == maxY) {
+      ball.direction = Vector2(ball.direction.x, -ball.direction.y);
+    }
   }
 
   @override
@@ -87,53 +101,32 @@ class MyGame extends FlameGame with KeyboardEvents {
     KeyEvent event,
     Set<LogicalKeyboardKey> keysPressed,
   ) {
-    bool isKeyDown = event is KeyDownEvent;
+    bool isKeyUp = event is KeyUpEvent;
 
+    debugPrint('isKeyDown: $isKeyUp');
+    debugPrint('event.logicalKey: ${event.logicalKey}');
     if (event.logicalKey == LogicalKeyboardKey.keyW) {
-      leftPaddle.movement = isKeyDown ? PaddleMovement.up : PaddleMovement.idle;
+      leftPaddle.direction =
+          isKeyUp ? PaddleDirection.idle : PaddleDirection.up;
       return KeyEventResult.handled;
     } else if (event.logicalKey == LogicalKeyboardKey.keyS) {
-      leftPaddle.movement =
-          isKeyDown ? PaddleMovement.down : PaddleMovement.idle;
+      leftPaddle.direction =
+          isKeyUp ? PaddleDirection.idle : PaddleDirection.down;
       return KeyEventResult.handled;
     } else if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-      rightPaddle.movement =
-          isKeyDown ? PaddleMovement.up : PaddleMovement.idle;
+      rightPaddle.direction =
+          isKeyUp ? PaddleDirection.idle : PaddleDirection.up;
       return KeyEventResult.handled;
     } else if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      rightPaddle.movement =
-          isKeyDown ? PaddleMovement.down : PaddleMovement.idle;
+      rightPaddle.direction =
+          isKeyUp ? PaddleDirection.idle : PaddleDirection.down;
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
   }
 }
 
-class Paddle extends RectangleComponent {
-  double speed;
-
-  Paddle({
-    required super.size,
-    super.position,
-  })  : speed = size!.y * 6,
-        super(anchor: Anchor.center);
-
-  PaddleMovement movement = PaddleMovement.idle;
-
-  void move(double dy) {
-    position = Vector2(position.x, position.y + dy);
-  }
-}
-
-class Ball extends CircleComponent {
-  Ball({
-    required super.radius,
-    super.position,
-  })  : speed = radius! * 50,
-        super(anchor: Anchor.center);
-
-  late Vector2 movement;
-  double speed;
-}
-
-enum PaddleMovement { up, down, idle }
+Vector2 randomVec2(rnd) => Vector2(
+      rnd.nextDouble().clamp(0.2, 0.8),
+      rnd.nextDouble(),
+    );
